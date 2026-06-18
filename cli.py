@@ -185,6 +185,16 @@ def mainloop(vault: Optional[PasswordVault]):
             print("Çıkış yapılıyor.")
             break
 
+        elif cmd == "help":
+            print("""\nKomut listesi:
+            list: Kasada bulunan parolaları listeler.
+            add: Kasaya yeni bir girdi ekler.
+            update: Kasadaki bir girdinin değerini değiştirir.
+            get: Kasadaki tek bir girdiyi ekrana yazdırır.
+            switch: Kasayı değiştirir.
+            help: Komutları listeler.
+            """)
+
         else:
             print("Bilinmeyen komut.")
 
@@ -194,7 +204,7 @@ def run_cli():
     print("=== Password Vault CLI ===")
 
     print("""\nKomutlar:
-          list, add, update, remove, get, switch, exit\n""")
+            list, add, update, remove, get, switch, help, exit\n""")
 
     mainloop(vault_select())
 
