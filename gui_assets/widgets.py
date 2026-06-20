@@ -3,8 +3,8 @@ import hashlib
 import os
 from typing import Optional
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -39,6 +39,17 @@ TYPE_COLORS = {
     "not_specified": "#78909C",
 }
 
+# Sıralama modları
+SORT_OLDEST_FIRST = "oldest"
+SORT_NEWEST_FIRST = "newest"
+SORT_BY_BADGE = "badge"
+
+SORT_OPTIONS = [
+    (SORT_NEWEST_FIRST, "Yeniden Eskiye"),
+    (SORT_OLDEST_FIRST, "Eskiden Yeniye"),
+    (SORT_BY_BADGE, "Türe Göre (A-Z)"),
+]
+
 
 def derive_vault_filename(
     vault_name: str, password: bytes, secretive: bool = True
@@ -59,6 +70,11 @@ def get_color_for_type(data_type: str) -> QColor:
     return QColor(TYPE_COLORS.get(data_type, "#78909C"))
 
 
+def copy_to_clipboard(text: str):
+    """Verilen metni panoya kopyalar."""
+    QGuiApplication.clipboard().setText(text or "")
+
+
 class EntryTypeBadge(QLabel):
     """Giriş türü etiketi."""
 
@@ -76,7 +92,112 @@ class EntryTypeBadge(QLabel):
         """)
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(24)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.adjustSize()
+
+
+class CopyButton(QPushButton):
+    """Küçük, sade bir 'kopyala' butonu. Tıklayınca değeri panoya kopyalar
+    ve kısa süreliğine geri bildirim gösterir."""
+
+    def __init__(self, value: str, parent=None):
+        super().__init__("Kopyala", parent)
+        self.value = value
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(24)
+        self.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #2563EB;
+                border: 1px solid #2563EB;
+                border-radius: 10px;
+                padding: 2px 10px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: rgba(37, 99, 235, 30);
+            }
+            QPushButton:pressed {
+                background: rgba(37, 99, 235, 60);
+            }
+        """)
+        self.clicked.connect(self._on_clicked)
+
+    def _on_clicked(self):
+        copy_to_clipboard(self.value)
+        original = "Kopyala"
+        self.setText("Kopyalandı")
+        self.setEnabled(False)
+        QTimer.singleShot(1000, lambda: (self.setText(original), self.setEnabled(True)))
+
+
+class EntryRowWidget(QWidget):
+    """Tek bir giriş satırı. Tıklanınca ek notu açılır/kapanır."""
+
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.expanded = False
+        self._init_ui()
+
+    def _init_ui(self):
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        header = QWidget()
+        header.setMinimumHeight(44)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(16, 6, 12, 6)
+        h_layout.setSpacing(10)
+
+        # İsim
+        name_label = QLabel(self.entry.name)
+        name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        name_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        # Değer (kırpılmış / elided metin)
+        value_label = QLabel()
+        value_label.setStyleSheet("color: #90A4AE; font-size: 9pt;")
+        value_label.setMaximumWidth(150)
+        value_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        fm = QFontMetrics(value_label.font())
+        elided = fm.elidedText(self.entry.value or "", Qt.ElideRight, 150)
+        value_label.setText(elided)
+        if self.entry.value:
+            value_label.setToolTip(self.entry.value)
+
+        # Badge
+        badge = EntryTypeBadge(self.entry.data_type)
+
+        # Kopyala butonu
+        copy_btn = CopyButton(self.entry.value or "")
+
+        h_layout.addWidget(name_label, 0, Qt.AlignVCenter)
+        h_layout.addWidget(value_label, 0, Qt.AlignVCenter)
+        h_layout.addStretch()
+        h_layout.addWidget(badge, 0, Qt.AlignVCenter)
+        h_layout.addWidget(copy_btn, 0, Qt.AlignVCenter)
+
+        self.main_layout.addWidget(header)
+
+        note_text = self.entry.additional_note or "Bu giriş için not eklenmemiş."
+        self.note_label = QLabel(note_text)
+        self.note_label.setWordWrap(True)
+        self.note_label.setStyleSheet("""
+            color: #607D8B;
+            font-size: 9pt;
+            font-style: italic;
+            padding: 0px 16px 12px 16px;
+        """)
+        self.note_label.setVisible(False)
+        self.main_layout.addWidget(self.note_label)
+
+    def toggle(self):
+        """Notu aç/kapat."""
+        self.expanded = not self.expanded
+        self.note_label.setVisible(self.expanded)
 
 
 class VaultListWidget(QWidget):
@@ -260,24 +381,46 @@ class EntryListWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.sort_mode = SORT_NEWEST_FIRST
+        self.current_entries = []  # Dosyadaki orijinal sıra (kaynak veri)
+        self.displayed_entries = []  # Ekranda gösterilen (sıralanmış) hali
         self._init_ui()
-        self.current_entries = []
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        # Başlık
+        # Başlık + Sıralama
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(10)
+
         title = QLabel("Kasa İçeriği")
         title_font = QFont("Segoe UI", 18, QFont.Bold)
         title.setFont(title_font)
         title.setObjectName("section-title")
-        layout.addWidget(title)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+
+        sort_label = QLabel("Sırala:")
+        sort_label.setStyleSheet("color: #6B7280; font-size: 10pt;")
+        self.sort_combo = QComboBox()
+        for value, label in SORT_OPTIONS:
+            self.sort_combo.addItem(label, value)
+        self.sort_combo.setMinimumHeight(32)
+        self.sort_combo.setMinimumWidth(160)
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+
+        header_layout.addWidget(sort_label)
+        header_layout.addWidget(self.sort_combo)
+        layout.addLayout(header_layout)
 
         # Giriş listesi
         self.list_widget = QListWidget()
         self.list_widget.setAlternatingRowColors(False)
+        self.list_widget.setUniformItemSizes(False)
+        self.list_widget.setCursor(Qt.PointingHandCursor)
+        self.list_widget.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget)
 
         # Butonlar
@@ -299,41 +442,68 @@ class EntryListWidget(QWidget):
         layout.addLayout(btn_layout)
 
     def load_entries(self, entries: list):
-        """Girişleri listede gösterir."""
+        """Vault'tan gelen ham girişleri saklar ve gösterir."""
+        self.current_entries = list(entries)
+        self._refresh_display()
+
+    def _get_sorted_entries(self):
+        if self.sort_mode == SORT_OLDEST_FIRST:
+            return list(self.current_entries)
+        elif self.sort_mode == SORT_NEWEST_FIRST:
+            return list(reversed(self.current_entries))
+        elif self.sort_mode == SORT_BY_BADGE:
+            return sorted(
+                self.current_entries,
+                key=lambda e: (e.data_type or "").lower(),
+            )
+        return list(self.current_entries)
+
+    def _refresh_display(self):
+        """Mevcut sıralama moduna göre listeyi yeniden çizer."""
         self.list_widget.clear()
-        self.current_entries = entries
-        for entry in entries:
+        self.displayed_entries = self._get_sorted_entries()
+        for entry in self.displayed_entries:
             self._add_entry_item(entry)
 
+    def _on_sort_changed(self, index: int):
+        self.sort_mode = self.sort_combo.itemData(index)
+        self._refresh_display()
+
     def _add_entry_item(self, entry):
-        """Giriş için özel liste öğesi."""
-        widget = QWidget()
-        h_layout = QHBoxLayout(widget)
-        h_layout.setContentsMargins(8, 6, 8, 6)
-        h_layout.setSpacing(10)
-
-        # İsim
-        name_label = QLabel(entry.name)
-        name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-
-        # Değer
-        value_label = QLabel(entry.value or "")
-        value_label.setStyleSheet("color: #90A4AE; font-size: 9px;")
-        value_label.setMaximumWidth(150)
-        value_label.setElidedText = True
-
-        # Badge
-        badge = EntryTypeBadge(entry.data_type)
-
-        h_layout.addWidget(name_label)
-        h_layout.addWidget(value_label)
-        h_layout.addStretch()
-        h_layout.addWidget(badge)
-
+        """Giriş için tıklanabilir, notu açılır-kapanır liste öğesi oluşturur."""
+        widget = EntryRowWidget(entry)
         item = QListWidgetItem()
         item.setSizeHint(widget.sizeHint())
         self.list_widget.addItem(item)
         self.list_widget.setItemWidget(item, widget)
+
+    def _on_item_clicked(self, item):
+        """Satıra tıklanınca ek notu aç/kapat ve satır yüksekliğini güncelle."""
+        widget = self.list_widget.itemWidget(item)
+        if widget is None:
+            return
+        widget.toggle()
+        item.setSizeHint(widget.sizeHint())
+
+    def _selected_entry(self):
+        """Seçili öğeye karşılık gelen Entry nesnesini döndürür."""
+        item = self.list_widget.currentItem()
+        if not item:
+            return None
+        idx = self.list_widget.row(item)
+        if 0 <= idx < len(self.displayed_entries):
+            return self.displayed_entries[idx]
+        return None
+
+    def _copy_selected(self):
+        entry = self._selected_entry()
+        if not entry:
+            QMessageBox.warning(self, "Uyarı", "Kopyalamak için bir giriş seçin.")
+            return
+        copy_to_clipboard(entry.value or "")
+        QMessageBox.information(
+            self, "Kopyalandı", f"'{entry.name}' değeri panoya kopyalandı."
+        )
 
     def _add_entry(self):
         dialog = QDialog(self)
@@ -380,14 +550,10 @@ class EntryListWidget(QWidget):
             self.entry_added.emit(entry)
 
     def _edit_entry(self):
-        item = self.list_widget.currentItem()
-
-        if not item:
+        entry = self._selected_entry()
+        if not entry:
             QMessageBox.warning(self, "Uyarı", "Düzenlemek için bir giriş seçin.")
             return
-
-        idx = self.list_widget.row(item)
-        entry = self.current_entries[idx]
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Girişi Düzenle")
@@ -416,14 +582,11 @@ class EntryListWidget(QWidget):
             self.entry_updated.emit(entry.name, new_value, new_note)
 
     def _delete_entry(self):
-        item = self.list_widget.currentItem()
-
-        if not item:
+        entry = self._selected_entry()
+        if not entry:
             QMessageBox.warning(self, "Uyarı", "Silmek için bir giriş seçin.")
             return
 
-        idx = self.list_widget.row(item)
-        entry = self.current_entries[idx]
         reply = QMessageBox.question(
             self,
             "Onay",
