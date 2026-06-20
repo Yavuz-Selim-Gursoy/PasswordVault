@@ -49,7 +49,7 @@ THEMES = {
             }
 
             QListWidget::item {
-                padding: 8px;
+                padding: 0px;
                 border-bottom: 1px solid #E5E7EB;
             }
 
@@ -57,10 +57,36 @@ THEMES = {
                 border-bottom: none;
             }
 
+            QListWidget::item:hover {
+                background: rgba(240, 244, 248, 150);
+                border-radius: 6px;
+            }
+
             QListWidget::item:selected {
                 background: linear-gradient(to right, #2563EB, #1D4ED8);
                 color: white;
                 border-radius: 6px;
+            }
+
+            QWidget#entry-detail {
+                background: rgba(37, 99, 235, 18);
+                border-left: 3px solid rgba(37, 99, 235, 130);
+                border-radius: 4px;
+            }
+
+            QLabel#detail-field-title {
+                color: #1D4ED8;
+            }
+
+            QWidget#entry-row {
+                background-color: #E8EBF0;
+                border: 1px solid rgba(37, 99, 235, 120);
+                border-radius: 8px;
+                margin: 2px 6px;
+            }
+
+            QWidget#entry-row:hover {
+                background-color: #DBE1E9;
             }
 
             QLineEdit, QTextEdit {
@@ -231,7 +257,7 @@ THEMES = {
             }
 
             QListWidget::item {
-                padding: 8px;
+                padding: 0px;
                 border-bottom: 1px solid #334155;
                 color: #F1F5F9;
             }
@@ -240,10 +266,36 @@ THEMES = {
                 border-bottom: none;
             }
 
+            QListWidget::item:hover {
+                background: rgba(51, 65, 85, 150);
+                border-radius: 6px;
+            }
+
             QListWidget::item:selected {
                 background: linear-gradient(to right, #3B82F6, #2563EB);
                 color: white;
                 border-radius: 6px;
+            }
+
+            QWidget#entry-detail {
+                background: rgba(59, 130, 246, 22);
+                border-left: 3px solid rgba(59, 130, 246, 140);
+                border-radius: 4px;
+            }
+
+            QLabel#detail-field-title {
+                color: #60A5FA;
+            }
+
+            QWidget#entry-row {
+                background-color: #334155;
+                border: 1px solid rgba(59, 130, 246, 130);
+                border-radius: 8px;
+                margin: 2px 6px;
+            }
+
+            QWidget#entry-row:hover {
+                background-color: #2A3647;
             }
 
             QLineEdit, QTextEdit {
@@ -416,7 +468,7 @@ THEMES = {
             }
 
             QListWidget::item {
-                padding: 8px;
+                padding: 0px;
                 border-bottom: 1px solid #BAE6FD;
             }
 
@@ -424,10 +476,36 @@ THEMES = {
                 border-bottom: none;
             }
 
+            QListWidget::item:hover {
+                background: rgba(202, 240, 248, 150);
+                border-radius: 6px;
+            }
+
             QListWidget::item:selected {
                 background: linear-gradient(to right, #0284C7, #0369A1);
                 color: white;
                 border-radius: 6px;
+            }
+
+            QWidget#entry-detail {
+                background: rgba(2, 132, 199, 20);
+                border-left: 3px solid rgba(2, 132, 199, 130);
+                border-radius: 4px;
+            }
+
+            QLabel#detail-field-title {
+                color: #0369A1;
+            }
+
+            QWidget#entry-row {
+                background-color: #BAE6FD;
+                border: 1px solid rgba(2, 132, 199, 120);
+                border-radius: 8px;
+                margin: 2px 6px;
+            }
+
+            QWidget#entry-row:hover {
+                background-color: #9DD9F9;
             }
 
             QLineEdit, QTextEdit {

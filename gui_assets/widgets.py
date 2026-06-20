@@ -97,14 +97,12 @@ class EntryTypeBadge(QLabel):
 
 
 class CopyButton(QPushButton):
-    """Küçük, sade bir 'kopyala' butonu. Tıklayınca değeri panoya kopyalar
-    ve kısa süreliğine geri bildirim gösterir."""
+    """Kopyala butonu"""
 
     def __init__(self, value: str, parent=None):
         super().__init__("Kopyala", parent)
         self.value = value
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(24)
         self.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -123,8 +121,10 @@ class CopyButton(QPushButton):
             }
         """)
         self.clicked.connect(self._on_clicked)
+        self.setMinimumHeight(26)
 
     def _on_clicked(self):
+        # Kopyalama işleminden sonra kısa süreli bildirim için
         copy_to_clipboard(self.value)
         original = "Kopyala"
         self.setText("Kopyalandı")
@@ -133,71 +133,139 @@ class CopyButton(QPushButton):
 
 
 class EntryRowWidget(QWidget):
-    """Tek bir giriş satırı. Tıklanınca ek notu açılır/kapanır."""
+    """Tek bir entry satırı.
+    Kapalıyken: Başlık, değer, badge ve değeri kopyalama butonu gösterilir.
+    Tıklanınca bu satır genişler; değer ve kopyala butonu üst satırdan kaybolur, yerine detaylı bir blok açılır.
+    """
 
     def __init__(self, entry, parent=None):
         super().__init__(parent)
         self.entry = entry
         self.expanded = False
+        self.setObjectName("entry-row")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self._init_ui()
 
     def _init_ui(self):
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(0, 0, 0, 4)
         self.main_layout.setSpacing(0)
 
+        # Başlık + badge, her zaman görünür
         header = QWidget()
         header.setMinimumHeight(44)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 6, 12, 6)
         h_layout.setSpacing(10)
 
-        # İsim
         name_label = QLabel(self.entry.name)
         name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
         name_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        # Değer (kırpılmış / elided metin)
-        value_label = QLabel()
-        value_label.setStyleSheet("color: #90A4AE; font-size: 9pt;")
-        value_label.setMaximumWidth(150)
-        value_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        fm = QFontMetrics(value_label.font())
+        # Değer, sadece kapalıyken görünür
+        self.value_label = QLabel()
+        self.value_label.setStyleSheet("color: #90A4AE; font-size: 9pt;")
+        self.value_label.setMaximumWidth(150)
+        self.value_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        fm = QFontMetrics(self.value_label.font())
         elided = fm.elidedText(self.entry.value or "", Qt.ElideRight, 150)
-        value_label.setText(elided)
+        self.value_label.setText(elided)
         if self.entry.value:
-            value_label.setToolTip(self.entry.value)
+            self.value_label.setToolTip(self.entry.value)
 
-        # Badge
         badge = EntryTypeBadge(self.entry.data_type)
 
-        # Kopyala butonu
-        copy_btn = CopyButton(self.entry.value or "")
+        # Kopyala butonu, sadece kapalıyken görünür
+        self.header_copy_btn = CopyButton(self.entry.value or "")
 
         h_layout.addWidget(name_label, 0, Qt.AlignVCenter)
-        h_layout.addWidget(value_label, 0, Qt.AlignVCenter)
+        h_layout.addWidget(self.value_label, 0, Qt.AlignVCenter)
         h_layout.addStretch()
         h_layout.addWidget(badge, 0, Qt.AlignVCenter)
-        h_layout.addWidget(copy_btn, 0, Qt.AlignVCenter)
+        h_layout.addWidget(self.header_copy_btn, 0, Qt.AlignVCenter)
 
         self.main_layout.addWidget(header)
 
+        # Detaylı görünümü ayarlamak için widget
+        self.detail_widget = QWidget()
+        self.detail_widget.setObjectName("entry-detail")
+        detail_outer_layout = QVBoxLayout(self.detail_widget)
+        detail_outer_layout.setContentsMargins(0, 4, 12, 10)
+        detail_outer_layout.setSpacing(0)
+
+        # Soldan girintiyi ayarlamak için widget
+        tab_container = QWidget()
+        detail_layout = QVBoxLayout(tab_container)
+        detail_layout.setContentsMargins(28, 10, 16, 10)
+        detail_layout.setSpacing(12)
+
+        detail_layout.addWidget(
+            self._build_field_block("Etiket", self.entry.name, copyable=True)
+        )
+        detail_layout.addWidget(
+            self._build_field_block("Değer", self.entry.value or "", copyable=True)
+        )
         note_text = self.entry.additional_note or "Bu giriş için not eklenmemiş."
-        self.note_label = QLabel(note_text)
-        self.note_label.setWordWrap(True)
-        self.note_label.setStyleSheet("""
-            color: #607D8B;
-            font-size: 9pt;
-            font-style: italic;
-            padding: 0px 16px 12px 16px;
-        """)
-        self.note_label.setVisible(False)
-        self.main_layout.addWidget(self.note_label)
+        detail_layout.addWidget(
+            self._build_field_block("Ek Not", note_text, copyable=False)
+        )
+
+        detail_outer_layout.addWidget(tab_container)
+        self.detail_widget.setVisible(False)
+        self.main_layout.addWidget(self.detail_widget)
+
+    def _build_field_block(self, title: str, content: str, copyable: bool) -> QWidget:
+        """Başlık + içerik bloğunu oluşturur."""
+        container = QWidget()
+        v_layout = QVBoxLayout(container)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        v_layout.setSpacing(3)
+
+        title_label = QLabel(f"{title}:")
+        title_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        title_label.setObjectName("detail-field-title")
+        v_layout.addWidget(title_label)
+
+        if copyable:
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+
+            content_label = QLabel(content)
+            content_label.setWordWrap(True)
+            content_label.setStyleSheet("font-size: 9pt;")
+
+            field_copy_btn = CopyButton(content)
+
+            row_layout.addWidget(content_label, 1)
+            row_layout.addWidget(field_copy_btn, 0, Qt.AlignTop)
+            v_layout.addWidget(row)
+        else:
+            content_label = QLabel(content)
+            content_label.setWordWrap(True)
+            content_label.setStyleSheet(
+                "color: #607D8B; font-style: italic; font-size: 9pt;"
+            )
+            v_layout.addWidget(content_label)
+
+        return container
 
     def toggle(self):
-        """Notu aç/kapat."""
+        """Detay görünümünü aç/kapat."""
         self.expanded = not self.expanded
-        self.note_label.setVisible(self.expanded)
+        self.detail_widget.setVisible(self.expanded)
+
+        # Açıkken üst satırdaki değer ve kopyala butonu gizlenir, kapanınca yeniden görünür hale gelir.
+        self.value_label.setVisible(not self.expanded)
+        self.header_copy_btn.setVisible(not self.expanded)
+
+        # Görünürlük değişikliğinden sonra layout'u zorla yeniden hesapla;
+        # aksi halde sizeHint() eski (güncellenmemiş) değeri döndürüp
+        # alt elemanların (ör. kopyala butonu) kesilmesine yol açabiliyor.
+        self.main_layout.invalidate()
+        self.main_layout.activate()
+        self.updateGeometry()
 
 
 class VaultListWidget(QWidget):
@@ -494,16 +562,6 @@ class EntryListWidget(QWidget):
         if 0 <= idx < len(self.displayed_entries):
             return self.displayed_entries[idx]
         return None
-
-    def _copy_selected(self):
-        entry = self._selected_entry()
-        if not entry:
-            QMessageBox.warning(self, "Uyarı", "Kopyalamak için bir giriş seçin.")
-            return
-        copy_to_clipboard(entry.value or "")
-        QMessageBox.information(
-            self, "Kopyalandı", f"'{entry.name}' değeri panoya kopyalandı."
-        )
 
     def _add_entry(self):
         dialog = QDialog(self)
