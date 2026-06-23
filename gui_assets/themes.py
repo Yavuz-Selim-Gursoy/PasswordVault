@@ -1,3 +1,4 @@
+# gui/themes.py
 from PySide6.QtWidgets import QApplication
 
 THEMES = {
@@ -42,9 +43,9 @@ THEMES = {
 
             QListWidget {
                 background: #F5F7FA;
-                border: 1px solid #D1D5DB;
+                border: 3px solid #D1D5DB;
                 border-radius: 8px;
-                padding: 4px;
+                padding: 16px;
                 outline: none;
             }
 
@@ -87,6 +88,22 @@ THEMES = {
 
             QWidget#entry-row:hover {
                 background-color: #DBE1E9;
+            }
+
+            QWidget#vault-row {
+                background-color: transparent;
+                border-left: 3px solid transparent;
+                border-radius: 6px;
+                margin: 1px 4px;
+            }
+
+            QWidget#vault-row:hover {
+                background-color: rgba(37, 99, 235, 18);
+            }
+
+            QWidget#vault-row[selected="true"] {
+                background-color: rgba(37, 99, 235, 30);
+                border-left: 3px solid #2563EB;
             }
 
             QLineEdit, QTextEdit {
@@ -250,9 +267,9 @@ THEMES = {
 
             QListWidget {
                 background: #1E293B;
-                border: 1px solid #475569;
+                border: 3px solid #475569;
                 border-radius: 8px;
-                padding: 4px;
+                padding: 16px;
                 outline: none;
             }
 
@@ -296,6 +313,22 @@ THEMES = {
 
             QWidget#entry-row:hover {
                 background-color: #2A3647;
+            }
+
+            QWidget#vault-row {
+                background-color: transparent;
+                border-left: 3px solid transparent;
+                border-radius: 6px;
+                margin: 1px 4px;
+            }
+
+            QWidget#vault-row:hover {
+                background-color: rgba(59, 130, 246, 25);
+            }
+
+            QWidget#vault-row[selected="true"] {
+                background-color: rgba(59, 130, 246, 35);
+                border-left: 3px solid #3B82F6;
             }
 
             QLineEdit, QTextEdit {
@@ -461,9 +494,9 @@ THEMES = {
 
             QListWidget {
                 background: #E0F2FE;
-                border: 1px solid #7DD3FC;
+                border: 3px solid #7DD3FC;
                 border-radius: 8px;
-                padding: 4px;
+                padding: 16px;
                 outline: none;
             }
 
@@ -506,6 +539,22 @@ THEMES = {
 
             QWidget#entry-row:hover {
                 background-color: #9DD9F9;
+            }
+
+            QWidget#vault-row {
+                background-color: transparent;
+                border-left: 3px solid transparent;
+                border-radius: 6px;
+                margin: 1px 4px;
+            }
+
+            QWidget#vault-row:hover {
+                background-color: rgba(2, 132, 199, 25);
+            }
+
+            QWidget#vault-row[selected="true"] {
+                background-color: rgba(2, 132, 199, 35);
+                border-left: 3px solid #0284C7;
             }
 
             QLineEdit, QTextEdit {

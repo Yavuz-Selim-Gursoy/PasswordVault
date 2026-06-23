@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import os
 
 from PySide6.QtCore import QSettings, Qt
@@ -16,6 +18,19 @@ from src.vault import PasswordVault
 
 from .themes import THEMES, apply_theme
 from .widgets import EntryListWidget, VaultListWidget
+
+
+def derive_vault_filename(
+    vault_name: str, password: bytes, secretive: bool = True
+) -> str:
+    """Kasa dosya adını türetir."""
+    if secretive:
+        h = hashlib.blake2b(
+            vault_name.encode("utf-8"), key=password, digest_size=16
+        ).digest()
+        return base64.urlsafe_b64encode(h).decode("ascii") + ".pvlt"
+    else:
+        return vault_name + ".pvlt"
 
 
 class MainWindow(QMainWindow):
@@ -42,6 +57,7 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self._apply_theme(self.current_theme)
+        self.showMaximized()
 
     def _init_ui(self):
         """Arayüzü oluştur."""
@@ -63,8 +79,8 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Splitter (sol-sağ)
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background: #E0E0E0; }")
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setStyleSheet("QSplitter::handle { background: #E0E0E0; }")
 
         # Sol panel
         self.vault_panel = VaultListWidget(self.vaults_dir)
@@ -76,18 +92,29 @@ class MainWindow(QMainWindow):
         self.entry_panel.entry_updated.connect(self._update_entry_in_vault)
         self.entry_panel.entry_deleted.connect(self._delete_entry_from_vault)
 
-        splitter.addWidget(self.vault_panel)
-        splitter.addWidget(self.entry_panel)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([300, 900])
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
+        self.splitter.addWidget(self.vault_panel)
+        self.splitter.addWidget(self.entry_panel)
+        self.splitter.setSizes([250, 750])
 
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.splitter)
 
         # Başlangıçta sağ panel deaktif
         self.entry_panel.setEnabled(False)
+
+    def _resizeEvent(self, event):
+        super().resizeEvent(event)
+        total_width = self.splitter.width()
+        if total_width <= 0:
+            return
+
+        left_ratio = 0.2
+        right_ratio = 0.8
+
+        left_width = int(total_width * left_ratio)
+        right_width = total_width - left_width
+
+        # Splitter'ı bu orana zorla
+        self.splitter.setSizes([left_width, right_width])
 
     def _change_theme(self):
         """Temayı değiştirir."""
@@ -102,17 +129,11 @@ class MainWindow(QMainWindow):
         apply_theme(QApplication.instance(), theme_name)
         # Dark temada splitter handle'ı daha açık yap
         if theme_name == "dark":
-            self.findChild(QSplitter).setStyleSheet(
-                "QSplitter::handle { background: #334155; }"
-            )
+            self.splitter.setStyleSheet("QSplitter::handle { background: #334155; }")
         elif theme_name == "ocean":
-            self.findChild(QSplitter).setStyleSheet(
-                "QSplitter::handle { background: #7DD3FC; }"
-            )
+            self.splitter.setStyleSheet("QSplitter::handle { background: #7DD3FC; }")
         else:
-            self.findChild(QSplitter).setStyleSheet(
-                "QSplitter::handle { background: #E5E7EB; }"
-            )
+            self.splitter.setStyleSheet("QSplitter::handle { background: #E5E7EB; }")
 
     def _open_vault_from_request(self, filename: str, password: str, secretive: bool):
         """Vault'u açmayı dener."""
@@ -142,9 +163,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Parola Kasası — {vault_filename}")
 
         # Sol panelde seçimi güncelle
-        items = self.vault_panel.list_widget.findItems(vault_filename, Qt.MatchExactly)
-        if items:
-            self.vault_panel.list_widget.setCurrentItem(items[0])
+        for i in range(self.vault_panel.list_widget.count()):
+            list_item = self.vault_panel.list_widget.item(i)
+            if list_item.data(Qt.UserRole) == vault_filename:
+                self.vault_panel.list_widget.setCurrentItem(list_item)
+                break
 
     def _add_entry_to_vault(self, entry):
         """Giriş ekler."""

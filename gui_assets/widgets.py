@@ -268,6 +268,30 @@ class EntryRowWidget(QWidget):
         self.updateGeometry()
 
 
+class VaultRowWidget(QWidget):
+    """Sol panelde tek bir kasa dosyası için sade kart görünümü."""
+
+    def __init__(self, filename: str, parent=None):
+        super().__init__(parent)
+        self.filename = filename
+        self.setObjectName("vault-row")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setProperty("selected", False)
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        name_label = QLabel(self.filename)
+        name_label.setObjectName("vault-row-name")
+        layout.addWidget(name_label)
+
+    def set_selected(self, selected: bool):
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+
 class VaultListWidget(QWidget):
     """Sol panel: kasa listesi ve hızlı açma formu."""
 
@@ -295,7 +319,7 @@ class VaultListWidget(QWidget):
         # Kasa listesi
         self.list_widget = QListWidget()
         self.list_widget.setAlternatingRowColors(False)
-        self.list_widget.currentTextChanged.connect(self._on_selection_changed)
+        self.list_widget.currentItemChanged.connect(self._update_selection_styles)
         layout.addWidget(self.list_widget)
 
         # Butonlar
@@ -305,7 +329,7 @@ class VaultListWidget(QWidget):
         self.new_btn = QPushButton("Yeni Kasa")
         self.new_btn.clicked.connect(self._create_new_vault)
 
-        self.open_btn = QPushButton("Seçileni Aç")
+        self.open_btn = QPushButton("Seçilen Kasayı Aç")
         self.open_btn.clicked.connect(self._open_selected_vault)
 
         btn_layout.addWidget(self.new_btn)
@@ -347,12 +371,24 @@ class VaultListWidget(QWidget):
         if not os.path.exists(self.vaults_dir):
             os.makedirs(self.vaults_dir)
 
-        for f in os.listdir(self.vaults_dir):
+        for f in sorted(os.listdir(self.vaults_dir)):
             if f.endswith(".pvlt"):
-                self.list_widget.addItem(f)
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, f)
+                widget = VaultRowWidget(f)
+                item.setSizeHint(widget.sizeHint())
+                self.list_widget.addItem(item)
+                self.list_widget.setItemWidget(item, widget)
 
-    def _on_selection_changed(self, current_text: str):
-        pass
+    def _update_selection_styles(self, current, previous):
+        if previous is not None:
+            widget = self.list_widget.itemWidget(previous)
+            if widget is not None:
+                widget.set_selected(False)
+        if current is not None:
+            widget = self.list_widget.itemWidget(current)
+            if widget is not None:
+                widget.set_selected(True)
 
     def _open_selected_vault(self):
         item = self.list_widget.currentItem()
@@ -360,7 +396,7 @@ class VaultListWidget(QWidget):
             QMessageBox.warning(self, "Uyarı", "Lütfen listeden bir kasa seçin.")
             return
 
-        filename = item.text()
+        filename = item.data(Qt.UserRole)
         password, ok = self._get_password_dialog(
             f"'{filename}' için master parolasını girin:"
         )
