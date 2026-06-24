@@ -27,16 +27,11 @@ SORT_OPTIONS: list[tuple[str, str]] = [
     (SORT_BY_BADGE, "Türe Göre (A-Z)"),
 ]
 
-
 # ---------------------------------------------------------------------------
 # Ölçek (asset/arayüz büyütme)
 # ---------------------------------------------------------------------------
 SCALE_OPTIONS: list[int] = [50, 100, 150, 200]
 DEFAULT_SCALE = 100
-
-# Aktif ölçek modül seviyesinde tutulur; widgets.py içindeki widget'lar
-# (entry satırları, badge'ler, butonlar vb.) oluşturulurken bu değeri
-# okuyarak boyutlarını buna göre hesaplar.
 CURRENT_SCALE = DEFAULT_SCALE
 
 
@@ -57,11 +52,6 @@ def scale_value(base: float, scale: int | None = None, minimum: int = 1) -> int:
 # Yeni tema eklemek için THEMES sözlüğüne yeni bir blok eklemek yeterli.
 # ---------------------------------------------------------------------------
 def _build_qss(c: dict, scale: int = DEFAULT_SCALE) -> str:
-    """Renk sözlüğünden tam QSS üretir — tekrar önlemek için.
-
-    `scale` yazı tipi boyutlarını, iç boşlukları (padding) ve bazı sabit
-    boyutları (gösterge, kaydırma çubuğu vb.) orantılı olarak büyütür/küçültür.
-    """
     sv = lambda px: scale_value(px, scale)  # noqa: E731
     fs = lambda pt: scale_value(pt, scale, minimum=6)  # noqa: E731
 
@@ -155,6 +145,20 @@ def _build_qss(c: dict, scale: int = DEFAULT_SCALE) -> str:
         }}
         QPushButton#settings-btn:hover {{ color: {c["accent"]}; }}
 
+        QMenuBar {{
+            background-color: {c["bg_primary"]};
+            color: {c["text_primary"]};
+            border-bottom: 1px solid {c["border"]};
+        }}
+        QMenuBar::item {{
+            padding: {sv(4)}px {sv(10)}px;
+            border-radius: {sv(4)}px;
+            color: {c["text_primary"]};
+            background: transparent;
+        }}
+        QMenuBar::item:selected {{ background: {c["accent"]}; color: white; }}
+        QMenuBar::item:pressed  {{ background: {c["accent_pressed"]}; color: white; }}
+
         QMenu {{
             background: {c["bg_secondary"]};
             border: 1px solid {c["border"]};
@@ -176,6 +180,23 @@ def _build_qss(c: dict, scale: int = DEFAULT_SCALE) -> str:
             background: {c["bg_primary"]}; color: {c["text_primary"]};
             selection-background-color: {c["accent"]};
             border: 1px solid {c["border"]}; border-radius: {sv(6)}px;
+        }}
+
+        QSpinBox {{
+            background: {c["bg_primary"]}; border: 1px solid {c["border"]};
+            border-radius: {sv(6)}px; padding: {sv(6)}px {sv(10)}px;
+            color: {c["text_primary"]}; selection-background-color: {c["accent"]};
+        }}
+        QSpinBox:focus {{ border: 2px solid {c["accent"]}; }}
+        QSpinBox::up-button, QSpinBox::down-button {{
+            background: transparent; border: none; width: {sv(18)}px;
+        }}
+
+        QFrame#section-separator {{
+            border: none;
+            border-top: 1px solid {c["border"]};
+            max-height: 1px;
+            margin: {sv(2)}px 0px;
         }}
 
         QCheckBox {{ spacing: {sv(8)}px; color: {c["text_primary"]}; }}
@@ -380,7 +401,7 @@ THEMES: dict[str, dict] = {
     },
 }
 
-# QSS her tema + ölçek kombinasyonu için colors sözlüğünden önceden üretilir
+# QSS her tema + ölçek kombinasyonu için önceden üretilir
 for _key, _theme in THEMES.items():
     _theme["qss_by_scale"] = {
         _scale: _build_qss(_theme["colors"], _scale) for _scale in SCALE_OPTIONS
