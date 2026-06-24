@@ -351,6 +351,8 @@ class VaultListWidget(QWidget):
 
     vault_selected = Signal(str)
     vault_open_requested = Signal(str, str, bool)
+    # Parola üretici modülünde "Kullan" butonuna basıldığında üretilen parolayla beraber emit edilir.
+    password_use_requested = Signal(str)
 
     def __init__(self, vaults_dir: str, parent=None):
         super().__init__(parent)
@@ -417,7 +419,94 @@ class VaultListWidget(QWidget):
         layout.addWidget(self.secretive_check)
         layout.addWidget(self.quick_open_btn)
 
+        # Parola Üret Bölümü
+        gen_title = QLabel("Parola Üret")
+        gen_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        gen_title.setObjectName("subsection-title")
+        layout.addWidget(gen_title)
+
+        # Uzunluk parçası
+        length_row = QWidget()
+        length_row_layout = QHBoxLayout(length_row)
+        length_row_layout.setContentsMargins(0, 0, 0, 0)
+        length_row_layout.setSpacing(8)
+
+        length_label = QLabel("Uzunluk:")
+        self.gen_length_spin = QSpinBox()
+        self.gen_length_spin.setRange(4, 128)
+        self.gen_length_spin.setValue(16)
+        self.gen_length_spin.setMinimumHeight(36)
+
+        length_row_layout.addWidget(length_label)
+        length_row_layout.addWidget(self.gen_length_spin, 1)
+        layout.addWidget(length_row)
+
+        # Üretim sonucu parçası
+        self.gen_result_row = QWidget()
+        gen_result_layout = QHBoxLayout(self.gen_result_row)
+        gen_result_layout.setContentsMargins(0, 0, 0, 0)
+        gen_result_layout.setSpacing(8)
+
+        self.gen_result_edit = QLineEdit()
+        self.gen_result_edit.setReadOnly(True)
+        self.gen_result_edit.setPlaceholderText("Üretilen parola burada görünecek")
+        self.gen_result_edit.setMinimumHeight(36)
+
+        # Kopyala butonu
+        self.password_module_copy_btn = CopyButton(self.gen_result_edit.text() or "")
+
+        gen_result_layout.addWidget(self.gen_result_edit)
+        gen_result_layout.addWidget(self.password_module_copy_btn)
+        layout.addWidget(self.gen_result_row)
+
+        # Oluştur ve Kullan butonlarının parçası
+        self.gen_create_btn = QPushButton("Oluştur")
+        self.gen_create_btn.setMinimumHeight(36)
+        self.gen_create_btn.clicked.connect(self._on_generate_password)
+        layout.addWidget(self.gen_create_btn)
+
+        self.gen_action_row = QWidget()
+        gen_action_layout = QHBoxLayout(self.gen_action_row)
+        gen_action_layout.setContentsMargins(0, 0, 0, 0)
+        gen_action_layout.setSpacing(8)
+
+        self.gen_regenerate_btn = QPushButton("Yeniden Oluştur")
+        self.gen_regenerate_btn.clicked.connect(self._on_generate_password)
+
+        self.gen_use_btn = QPushButton("Kullan")
+        self.gen_use_btn.clicked.connect(self._on_use_generated_password)
+
+        gen_action_layout.addWidget(self.gen_regenerate_btn)
+        gen_action_layout.addWidget(self.gen_use_btn)
+        self.gen_action_row.setVisible(False)
+        layout.addWidget(self.gen_action_row)
+
         layout.addStretch()
+
+    def _on_generate_password(self):
+        """'Oluştur' / 'Yeniden Oluştur' butonuna basıldığında çalışır."""
+        length = self.gen_length_spin.value()
+        try:
+            password = generate_password(length=length)
+        except PasswordGenerationError as e:
+            QMessageBox.warning(self, "Hata", str(e))
+            return
+
+        self.gen_result_edit.setText(password)
+        # Butonlar "Oluştur" tekliden "Yeniden Oluştur" + "Kullan" ikiliye döner
+
+        # Parola oluşturucunun yanındaki kopyalama butonu için
+        self.password_module_copy_btn.value = password
+
+        self.gen_create_btn.setVisible(False)
+        self.gen_action_row.setVisible(True)
+
+    def _on_use_generated_password(self):
+        """'Kullan' butonuna basıldığında üretilen parolayı dışarı bildirir."""
+        password = self.gen_result_edit.text()
+        if not password:
+            return
+        self.password_use_requested.emit(password)
 
     def refresh_list(self):
         """Vault dosyalarını listeler."""
@@ -575,7 +664,7 @@ class EntryListWidget(QWidget):
         self.add_btn.setToolTip("Yeni giriş ekle")
         self.add_btn.setMinimumHeight(scale_value(32))
         self.add_btn.setFixedWidth(scale_value(36))
-        self.add_btn.clicked.connect(self._add_entry)
+        self.add_btn.clicked.connect(lambda: self._add_entry())
 
         header_layout.addWidget(self.sort_label)
         header_layout.addWidget(self.sort_combo)
@@ -649,7 +738,12 @@ class EntryListWidget(QWidget):
         widget.toggle()
         item.setSizeHint(widget.sizeHint())
 
-    def _add_entry(self):
+    def open_add_entry_dialog(self, initial_value: str | None = None):
+        """Yeni giriş diyalogunu dışarıdan (örn. parola üretici modülünden)
+        açmak için kullanılan public metod."""
+        self._add_entry(initial_value=initial_value)
+
+    def _add_entry(self, initial_value: str | None = None):
         dialog = QDialog(self)
         dialog.setWindowTitle("Yeni Giriş Ekle")
         dialog.setMinimumWidth(450)
@@ -664,8 +758,13 @@ class EntryListWidget(QWidget):
         type_combo.setEditable(True)
         type_combo.addItems(list(TYPE_COLORS.keys()))
         type_combo.setMinimumHeight(36)
+        if initial_value:
+            # Dışarıdan üretilmiş bir parola geldiyse türü otomatik "password" yap
+            password_index = type_combo.findText("password")
+            if password_index >= 0:
+                type_combo.setCurrentIndex(password_index)
 
-        value_edit = QLineEdit()
+        value_edit = QLineEdit(initial_value or "")
         value_edit.setMinimumHeight(36)
 
         gen_btn = QPushButton("⚄")

@@ -119,6 +119,9 @@ class MainWindow(QMainWindow):
         # Sol panel
         self.vault_panel = VaultListWidget(self.vaults_dir)
         self.vault_panel.vault_open_requested.connect(self._open_vault_from_request)
+        self.vault_panel.password_use_requested.connect(
+            self._handle_generated_password_use
+        )
 
         # Sağ panel
         self.entry_panel = EntryListWidget()
@@ -201,6 +204,22 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"Kasa açılamadı: {e}")
 
+    def _handle_generated_password_use(self, password: str):
+        """Parola üretici modülünde 'Kullan' butonuna basıldığında çağrılır.
+
+        Açık bir kasa yoksa kullanıcıyı uyarır; varsa giriş ekleme
+        panelini açıp üretilen parolayı 'Değer' alanına yerleştirir.
+        """
+        if not self.active_vault:
+            QMessageBox.warning(
+                self,
+                "Kasa Açık Değil",
+                "Üretilen parolayı bir girişe ekleyebilmek için önce bir kasa açmalısınız.",
+            )
+            return
+
+        self.entry_panel.open_add_entry_dialog(initial_value=password)
+
     def _set_active_vault(self, vault: PasswordVault):
         """Aktif vault'u ayarlar."""
         self.active_vault = vault
@@ -241,7 +260,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Kasa Kilitlendi",
-            "Kasa, açıldıktan 5 dakika sonra güvenlik amacıyla otomatik olarak kapatılır. İşleminize devam etmek için kasayı yeniden açın.",
+            "Kasa, açıldıktan 5 dakika sonra güvenlik amacıyla otomatik olarak kapatıldı.",
         )
 
     def _add_entry_to_vault(self, entry):
