@@ -21,11 +21,13 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from src.entry import Entry
+from src.password_generator import PasswordGenerationError, generate_password
 from src.vault import PasswordVault
 
 from .config import (
@@ -34,7 +36,11 @@ from .config import (
     SORT_OLDEST_FIRST,
     SORT_OPTIONS,
     TYPE_COLORS,
+    scale_value,
 )
+
+# Panodaki hassas değerlerin otomatik temizlenmesi için bekleme süresi (ms)
+CLIPBOARD_CLEAR_DELAY_MS = 30_000
 
 
 def derive_vault_filename(
@@ -65,15 +71,15 @@ def _make_row_btn(symbol: str, tooltip: str, color: str) -> QPushButton:
     btn = QPushButton(symbol)
     btn.setToolTip(tooltip)
     btn.setCursor(Qt.PointingHandCursor)
-    btn.setMinimumHeight(26)
+    btn.setMinimumHeight(scale_value(26))
     btn.setStyleSheet(f"""
         QPushButton {{
             background: transparent;
             color: {color};
             border: 1px solid {color};
-            border-radius: 10px;
-            padding: 2px 10px;
-            font-size: 10px;
+            border-radius: {scale_value(10)}px;
+            padding: {scale_value(2)}px {scale_value(10)}px;
+            font-size: {scale_value(10)}px;
             font-weight: 600;
         }}
         QPushButton:hover  {{ background: rgba(0,0,0,15); }}
@@ -91,41 +97,53 @@ class EntryTypeBadge(QLabel):
         self.setStyleSheet(f"""
             background-color: {color.name()};
             color: white;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 11px;
+            padding: {scale_value(4)}px {scale_value(12)}px;
+            border-radius: {scale_value(12)}px;
+            font-size: {scale_value(11)}px;
             font-weight: 600;
             letter-spacing: 0.3px;
         """)
         self.setAlignment(Qt.AlignCenter)
-        self.setFixedHeight(24)
+        self.setFixedHeight(scale_value(24))
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.adjustSize()
 
 
 class CopyButton(QPushButton):
-    """Kopyala butonu."""
+    """Kopyala butonu.
+
+    Tıklandığında değeri panoya kopyalar ve `CLIPBOARD_CLEAR_DELAY_MS`
+    (varsayılan 30sn) sonra panoyu otomatik temizler. Bu süre içinde pano
+    içeriği başka bir şeyle değiştirilmişse (örn. kullanıcı başka bir şey
+    kopyaladıysa) panoya dokunulmaz; sadece hâlâ bizim kopyaladığımız değer
+    duruyorsa temizlenir.
+
+    Not: Bu, uygulamanın kendi penceresinin pano içeriğini temizler. Bazı
+    masaüstü ortamları (örn. KDE Klipper) pano geçmişini ayrıca sakladığı
+    için, hassas değer işletim sisteminin pano geçmişinde kalabilir. Bu,
+    Qt/uygulama seviyesinde çözülemeyen bir işletim sistemi davranışıdır.
+    """
 
     def __init__(self, value: str, parent=None):
         super().__init__("⎘", parent)
         self.value = value
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Kopyala")
-        self.setStyleSheet("""
-            QPushButton {
+        self.setStyleSheet(f"""
+            QPushButton {{
                 background: transparent;
                 color: #2563EB;
                 border: 1px solid #2563EB;
-                border-radius: 10px;
-                padding: 2px 10px;
-                font-size: 10px;
+                border-radius: {scale_value(10)}px;
+                padding: {scale_value(2)}px {scale_value(10)}px;
+                font-size: {scale_value(10)}px;
                 font-weight: 600;
-            }
-            QPushButton:hover  { background: rgba(37, 99, 235, 30); }
-            QPushButton:pressed { background: rgba(37, 99, 235, 60); }
+            }}
+            QPushButton:hover  {{ background: rgba(37, 99, 235, 30); }}
+            QPushButton:pressed {{ background: rgba(37, 99, 235, 60); }}
         """)
         self.clicked.connect(self._on_clicked)
-        self.setMinimumHeight(26)
+        self.setMinimumHeight(scale_value(26))
 
     def _on_clicked(self):
         # Kopyalama işleminden sonra kısa süreli bildirim için
@@ -134,6 +152,20 @@ class CopyButton(QPushButton):
         self.setText("✓")
         self.setEnabled(False)
         QTimer.singleShot(1000, lambda: (self.setText(original), self.setEnabled(True)))
+
+        # Hassas değeri sonsuza dek panoda bırakmamak için otomatik temizleme
+        copied_value = self.value
+        QTimer.singleShot(
+            CLIPBOARD_CLEAR_DELAY_MS,
+            lambda: self._clear_clipboard_if_unchanged(copied_value),
+        )
+
+    @staticmethod
+    def _clear_clipboard_if_unchanged(expected_value: str):
+        """Pano hâlâ bizim kopyaladığımız değeri içeriyorsa temizler."""
+        clipboard = QGuiApplication.clipboard()
+        if clipboard.text() == expected_value:
+            clipboard.clear()
 
 
 class EntryRowWidget(QWidget):
@@ -159,24 +191,29 @@ class EntryRowWidget(QWidget):
         self.main_layout.setContentsMargins(0, 0, 0, 4)
         self.main_layout.setSpacing(0)
 
-        # Başlık + badge, her zaman görünür
+        # --- Üst kısım (her zaman görünür) ---
         header = QWidget()
-        header.setMinimumHeight(44)
+        header.setMinimumHeight(scale_value(44))
         h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(16, 6, 12, 6)
-        h_layout.setSpacing(8)
+        h_layout.setContentsMargins(
+            scale_value(16), scale_value(6), scale_value(12), scale_value(6)
+        )
+        h_layout.setSpacing(scale_value(8))
 
         name_label = QLabel(self.entry.name)
-        name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        name_label.setFont(QFont("Segoe UI", scale_value(10), QFont.Bold))
         name_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        # Değer, sadece kapalıyken görünür
+        # Değer: sadece kapalıyken görünür
         self.value_label = QLabel()
-        self.value_label.setStyleSheet("color: #90A4AE; font-size: 9pt;")
-        self.value_label.setMaximumWidth(150)
+        self.value_label.setStyleSheet(
+            f"color: #90A4AE; font-size: {scale_value(9)}pt;"
+        )
+        value_max_width = scale_value(150)
+        self.value_label.setMaximumWidth(value_max_width)
         self.value_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         fm = QFontMetrics(self.value_label.font())
-        elided = fm.elidedText(self.entry.value or "", Qt.ElideRight, 150)
+        elided = fm.elidedText(self.entry.value or "", Qt.ElideRight, value_max_width)
         self.value_label.setText(elided)
         if self.entry.value:
             self.value_label.setToolTip(self.entry.value)
@@ -202,7 +239,7 @@ class EntryRowWidget(QWidget):
 
         self.main_layout.addWidget(header)
 
-        # Detaylı görünümü ayarlamak için widget
+        # --- Alt kısım: detay bloğu (kapalıyken gizli) ---
         self.detail_widget = QWidget()
         self.detail_widget.setObjectName("entry-detail")
         detail_outer_layout = QVBoxLayout(self.detail_widget)
@@ -516,30 +553,31 @@ class EntryListWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setSpacing(10)
 
-        title = QLabel("Kasa İçeriği")
-        title_font = QFont("Segoe UI", 18, QFont.Bold)
-        title.setFont(title_font)
-        title.setObjectName("section-title")
-        header_layout.addWidget(title)
+        self.title_label = QLabel("Kasa İçeriği")
+        self.title_label.setFont(QFont("Segoe UI", scale_value(18), QFont.Bold))
+        self.title_label.setObjectName("section-title")
+        header_layout.addWidget(self.title_label)
         header_layout.addStretch()
 
-        sort_label = QLabel("Sırala:")
-        sort_label.setStyleSheet("color: #6B7280; font-size: 10pt;")
+        self.sort_label = QLabel("Sırala:")
+        self.sort_label.setStyleSheet(
+            f"color: #6B7280; font-size: {scale_value(10)}pt;"
+        )
         self.sort_combo = QComboBox()
         for value, label in SORT_OPTIONS:
             self.sort_combo.addItem(label, value)
-        self.sort_combo.setMinimumHeight(32)
-        self.sort_combo.setMinimumWidth(160)
+        self.sort_combo.setMinimumHeight(scale_value(32))
+        self.sort_combo.setMinimumWidth(scale_value(160))
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
 
         # Ekle butonu: dropdown'ın hemen yanında
         self.add_btn = QPushButton("+")
         self.add_btn.setToolTip("Yeni giriş ekle")
-        self.add_btn.setMinimumHeight(32)
-        self.add_btn.setFixedWidth(36)
+        self.add_btn.setMinimumHeight(scale_value(32))
+        self.add_btn.setFixedWidth(scale_value(36))
         self.add_btn.clicked.connect(self._add_entry)
 
-        header_layout.addWidget(sort_label)
+        header_layout.addWidget(self.sort_label)
         header_layout.addWidget(self.sort_combo)
         header_layout.addWidget(self.add_btn)
         layout.addLayout(header_layout)
@@ -551,6 +589,19 @@ class EntryListWidget(QWidget):
         self.list_widget.setCursor(Qt.PointingHandCursor)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget)
+
+    def apply_scale(self):
+        """Ölçek değiştiğinde başlık/etiket/buton boyutlarını günceller
+        ve satırları yeni ölçekle yeniden çizer."""
+        self.title_label.setFont(QFont("Segoe UI", scale_value(18), QFont.Bold))
+        self.sort_label.setStyleSheet(
+            f"color: #6B7280; font-size: {scale_value(10)}pt;"
+        )
+        self.sort_combo.setMinimumHeight(scale_value(32))
+        self.sort_combo.setMinimumWidth(scale_value(160))
+        self.add_btn.setMinimumHeight(scale_value(32))
+        self.add_btn.setFixedWidth(scale_value(36))
+        self._refresh_display()
 
     def load_entries(self, entries: list):
         """Vault'tan gelen ham girişleri saklar ve gösterir."""
@@ -617,12 +668,27 @@ class EntryListWidget(QWidget):
         value_edit = QLineEdit()
         value_edit.setMinimumHeight(36)
 
+        gen_btn = QPushButton("⚄")
+        gen_btn.setToolTip("Parola Üret")
+        gen_btn.setFixedWidth(40)
+        gen_btn.setMinimumHeight(36)
+        gen_btn.clicked.connect(
+            lambda: self._open_password_generator_dialog(value_edit)
+        )
+
+        value_row = QWidget()
+        value_row_layout = QHBoxLayout(value_row)
+        value_row_layout.setContentsMargins(0, 0, 0, 0)
+        value_row_layout.setSpacing(6)
+        value_row_layout.addWidget(value_edit)
+        value_row_layout.addWidget(gen_btn)
+
         note_edit = QLineEdit()
         note_edit.setMinimumHeight(36)
 
         form.addRow("İsim:", name_edit)
         form.addRow("Tür:", type_combo)
-        form.addRow("Değer:", value_edit)
+        form.addRow("Değer:", value_row)
         form.addRow("Not:", note_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -642,6 +708,53 @@ class EntryListWidget(QWidget):
             entry = Entry(name, data_type, value, note)
             self.entry_added.emit(entry)
 
+    def _open_password_generator_dialog(self, target_edit: QLineEdit):
+        """Parola üretici parametrelerini sorar ve sonucu hedef alana yazar."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Parola Üret")
+        dialog.setMinimumWidth(350)
+
+        form = QFormLayout(dialog)
+        form.setSpacing(12)
+
+        length_spin = QSpinBox()
+        length_spin.setRange(4, 128)
+        length_spin.setValue(16)
+
+        upper_cb = QCheckBox("Büyük harf (A-Z)")
+        upper_cb.setChecked(True)
+        lower_cb = QCheckBox("Küçük harf (a-z)")
+        lower_cb.setChecked(True)
+        digits_cb = QCheckBox("Rakam (0-9)")
+        digits_cb.setChecked(True)
+        symbols_cb = QCheckBox("Sembol (!@#$...)")
+        symbols_cb.setChecked(True)
+
+        form.addRow("Uzunluk:", length_spin)
+        form.addRow(upper_cb)
+        form.addRow(lower_cb)
+        form.addRow(digits_cb)
+        form.addRow(symbols_cb)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() == QDialog.Accepted:
+            try:
+                password = generate_password(
+                    length=length_spin.value(),
+                    use_upper=upper_cb.isChecked(),
+                    use_lower=lower_cb.isChecked(),
+                    use_digits=digits_cb.isChecked(),
+                    use_symbols=symbols_cb.isChecked(),
+                )
+            except PasswordGenerationError as e:
+                QMessageBox.warning(self, "Hata", str(e))
+                return
+            target_edit.setText(password)
+
     def _edit_entry(self, entry):
         """Verilen entry için düzenleme dialogunu açar."""
         dialog = QDialog(self)
@@ -654,10 +767,25 @@ class EntryListWidget(QWidget):
         value_edit = QLineEdit(entry.value or "")
         value_edit.setMinimumHeight(36)
 
+        gen_btn = QPushButton("⚄")
+        gen_btn.setToolTip("Parola Üret")
+        gen_btn.setFixedWidth(40)
+        gen_btn.setMinimumHeight(36)
+        gen_btn.clicked.connect(
+            lambda: self._open_password_generator_dialog(value_edit)
+        )
+
+        value_row = QWidget()
+        value_row_layout = QHBoxLayout(value_row)
+        value_row_layout.setContentsMargins(0, 0, 0, 0)
+        value_row_layout.setSpacing(6)
+        value_row_layout.addWidget(value_edit)
+        value_row_layout.addWidget(gen_btn)
+
         note_edit = QLineEdit(entry.additional_note or "")
         note_edit.setMinimumHeight(36)
 
-        form.addRow("Yeni Değer:", value_edit)
+        form.addRow("Yeni Değer:", value_row)
         form.addRow("Yeni Not:", note_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
