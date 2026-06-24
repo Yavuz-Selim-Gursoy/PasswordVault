@@ -2,7 +2,8 @@ import base64
 import hashlib
 import os
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, Qt, QTimer
+from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -16,8 +17,13 @@ from PySide6.QtWidgets import (
 
 from src.vault import PasswordVault
 
-from .config import THEMES, apply_theme
+from . import config
+from .config import DEFAULT_SCALE, SCALE_OPTIONS, THEMES, apply_theme
 from .widgets import EntryListWidget, VaultListWidget
+
+# Aktif kasa hiçbir manuel kapatma olmadan açıldıktan kaç ms sonra otomatik
+# kilitlenir (5 dakika).
+VAULT_AUTO_LOCK_MS = 5 * 60 * 1000
 
 
 def derive_vault_filename(
@@ -49,11 +55,28 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("PasswordVault", "GUI")
         self.current_theme = self.settings.value("theme", "light")
 
+        loaded_scale = self.settings.value("scale", DEFAULT_SCALE)
+        try:
+            loaded_scale = int(loaded_scale)
+        except (TypeError, ValueError):
+            loaded_scale = DEFAULT_SCALE
+        self.current_scale = (
+            loaded_scale if loaded_scale in SCALE_OPTIONS else DEFAULT_SCALE
+        )
+        # widgets.py içindeki widget'lar oluşturulurken bu değeri okuyacağı
+        # için _init_ui() çağrılmadan ÖNCE ayarlanması gerekiyor.
+        config.set_current_scale(self.current_scale)
+
         # Aktif vault
         self.active_vault: PasswordVault = None
         self.vaults_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "vaults"
         )
+
+        # Kasa otomatik kilitleme zamanlayıcısı
+        self._vault_lock_timer = QTimer(self)
+        self._vault_lock_timer.setSingleShot(True)
+        self._vault_lock_timer.timeout.connect(self._auto_lock_vault)
 
         self._init_ui()
         self._apply_theme(self.current_theme)
@@ -71,6 +94,17 @@ class MainWindow(QMainWindow):
             action.setData(key)
             action.triggered.connect(self._change_theme)
 
+        scale_menu = menubar.addMenu("Ölçek")
+        self._scale_action_group = QActionGroup(self)
+        self._scale_action_group.setExclusive(True)
+        for s in SCALE_OPTIONS:
+            action = scale_menu.addAction(f"%{s}")
+            action.setData(s)
+            action.setCheckable(True)
+            action.setChecked(s == self.current_scale)
+            action.triggered.connect(self._change_scale)
+            self._scale_action_group.addAction(action)
+
         # Merkez widget
         central = QWidget()
         self.setCentralWidget(central)
@@ -85,6 +119,9 @@ class MainWindow(QMainWindow):
         # Sol panel
         self.vault_panel = VaultListWidget(self.vaults_dir)
         self.vault_panel.vault_open_requested.connect(self._open_vault_from_request)
+        self.vault_panel.password_use_requested.connect(
+            self._handle_generated_password_use
+        )
 
         # Sağ panel
         self.entry_panel = EntryListWidget()
@@ -124,9 +161,25 @@ class MainWindow(QMainWindow):
         self._apply_theme(theme_name)
         self.settings.setValue("theme", theme_name)
 
+    def _change_scale(self):
+        """Arayüz/asset ölçeğini değiştirir."""
+        action = self.sender()
+        scale = action.data()
+        self.current_scale = scale
+        config.set_current_scale(scale)
+
+        # Tema QSS'ini yeni ölçekle yeniden uygula
+        self._apply_theme(self.current_theme)
+
+        # Sabit boyutlarla oluşturulmuş entry satırlarını / başlık-buton
+        # boyutlarını yeniden çiz
+        self.entry_panel.apply_scale()
+
+        self.settings.setValue("scale", scale)
+
     def _apply_theme(self, theme_name: str):
         """Tema uygular."""
-        apply_theme(QApplication.instance(), theme_name)
+        apply_theme(QApplication.instance(), theme_name, self.current_scale)
         # Dark temada splitter handle'ı daha açık yap
         if theme_name == "dark":
             self.splitter.setStyleSheet("QSplitter::handle { background: #334155; }")
@@ -151,6 +204,22 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"Kasa açılamadı: {e}")
 
+    def _handle_generated_password_use(self, password: str):
+        """Parola üretici modülünde 'Kullan' butonuna basıldığında çağrılır.
+
+        Açık bir kasa yoksa kullanıcıyı uyarır; varsa giriş ekleme
+        panelini açıp üretilen parolayı 'Değer' alanına yerleştirir.
+        """
+        if not self.active_vault:
+            QMessageBox.warning(
+                self,
+                "Kasa Açık Değil",
+                "Üretilen parolayı bir girişe ekleyebilmek için önce bir kasa açmalısınız.",
+            )
+            return
+
+        self.entry_panel.open_add_entry_dialog(initial_value=password)
+
     def _set_active_vault(self, vault: PasswordVault):
         """Aktif vault'u ayarlar."""
         self.active_vault = vault
@@ -168,6 +237,31 @@ class MainWindow(QMainWindow):
             if list_item.data(Qt.UserRole) == vault_filename:
                 self.vault_panel.list_widget.setCurrentItem(list_item)
                 break
+
+        # Kasa açıldığı andan itibaren otomatik kilitleme geri sayımını başlat
+        self._vault_lock_timer.stop()
+        self._vault_lock_timer.start(VAULT_AUTO_LOCK_MS)
+
+    def _auto_lock_vault(self):
+        """VAULT_AUTO_LOCK_MS süresi dolduğunda aktif kasayı otomatik kapatır.
+
+        Not: Bu süre kullanıcı etkinliğiyle sıfırlanmaz; kasa açıldığı
+        andan itibaren sabit bir geri sayımdır.
+        """
+        if not self.active_vault:
+            return
+
+        self.active_vault = None
+        self.entry_panel.load_entries([])
+        self.entry_panel.setEnabled(False)
+        self.setWindowTitle("Parola Kasası")
+        self.vault_panel.list_widget.clearSelection()
+
+        QMessageBox.information(
+            self,
+            "Kasa Kilitlendi",
+            "Kasa, açıldıktan 5 dakika sonra güvenlik amacıyla otomatik olarak kapatıldı.",
+        )
 
     def _add_entry_to_vault(self, entry):
         """Giriş ekler."""
