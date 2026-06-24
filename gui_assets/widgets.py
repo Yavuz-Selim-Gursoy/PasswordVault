@@ -28,27 +28,13 @@ from PySide6.QtWidgets import (
 from src.entry import Entry
 from src.vault import PasswordVault
 
-# Türler için renkler
-TYPE_COLORS = {
-    "password": "#EF5350",
-    "username": "#42A5F5",
-    "note": "#66BB6A",
-    "email": "#AB47BC",
-    "credit_card": "#FFA726",
-    "address": "#29B6F6",
-    "not_specified": "#78909C",
-}
-
-# Sıralama modları
-SORT_OLDEST_FIRST = "oldest"
-SORT_NEWEST_FIRST = "newest"
-SORT_BY_BADGE = "badge"
-
-SORT_OPTIONS = [
-    (SORT_NEWEST_FIRST, "Yeniden Eskiye"),
-    (SORT_OLDEST_FIRST, "Eskiden Yeniye"),
-    (SORT_BY_BADGE, "Türe Göre (A-Z)"),
-]
+from .config import (
+    SORT_BY_BADGE,
+    SORT_NEWEST_FIRST,
+    SORT_OLDEST_FIRST,
+    SORT_OPTIONS,
+    TYPE_COLORS,
+)
 
 
 def derive_vault_filename(
@@ -60,7 +46,6 @@ def derive_vault_filename(
             vault_name.encode("utf-8"), key=password, digest_size=16
         ).digest()
         return base64.urlsafe_b64encode(h).decode("ascii") + ".pvlt"
-
     else:
         return vault_name + ".pvlt"
 
@@ -73,6 +58,28 @@ def get_color_for_type(data_type: str) -> QColor:
 def copy_to_clipboard(text: str):
     """Verilen metni panoya kopyalar."""
     QGuiApplication.clipboard().setText(text or "")
+
+
+def _make_row_btn(symbol: str, tooltip: str, color: str) -> QPushButton:
+    """Entry satırı için küçük, sade simge butonu oluşturur."""
+    btn = QPushButton(symbol)
+    btn.setToolTip(tooltip)
+    btn.setCursor(Qt.PointingHandCursor)
+    btn.setMinimumHeight(26)
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background: transparent;
+            color: {color};
+            border: 1px solid {color};
+            border-radius: 10px;
+            padding: 2px 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }}
+        QPushButton:hover  {{ background: rgba(0,0,0,15); }}
+        QPushButton:pressed {{ background: rgba(0,0,0,30); }}
+    """)
+    return btn
 
 
 class EntryTypeBadge(QLabel):
@@ -97,12 +104,13 @@ class EntryTypeBadge(QLabel):
 
 
 class CopyButton(QPushButton):
-    """Kopyala butonu"""
+    """Kopyala butonu."""
 
     def __init__(self, value: str, parent=None):
-        super().__init__("Kopyala", parent)
+        super().__init__("⎘", parent)
         self.value = value
         self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Kopyala")
         self.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -113,12 +121,8 @@ class CopyButton(QPushButton):
                 font-size: 10px;
                 font-weight: 600;
             }
-            QPushButton:hover {
-                background: rgba(37, 99, 235, 30);
-            }
-            QPushButton:pressed {
-                background: rgba(37, 99, 235, 60);
-            }
+            QPushButton:hover  { background: rgba(37, 99, 235, 30); }
+            QPushButton:pressed { background: rgba(37, 99, 235, 60); }
         """)
         self.clicked.connect(self._on_clicked)
         self.setMinimumHeight(26)
@@ -126,17 +130,21 @@ class CopyButton(QPushButton):
     def _on_clicked(self):
         # Kopyalama işleminden sonra kısa süreli bildirim için
         copy_to_clipboard(self.value)
-        original = "Kopyala"
-        self.setText("Kopyalandı")
+        original = "⎘"
+        self.setText("✓")
         self.setEnabled(False)
         QTimer.singleShot(1000, lambda: (self.setText(original), self.setEnabled(True)))
 
 
 class EntryRowWidget(QWidget):
     """Tek bir entry satırı.
-    Kapalıyken: Başlık, değer, badge ve değeri kopyalama butonu gösterilir.
-    Tıklanınca bu satır genişler; değer ve kopyala butonu üst satırdan kaybolur, yerine detaylı bir blok açılır.
+
+    Kapalıyken: isim, değer, badge, ⎘ kopyala, ↺ düzenle, ✕ sil görünür.
+    Tıklanınca detay bloğu açılır; değer ve ⎘ gizlenir, ↺ ve ✕ kalır.
     """
+
+    edit_requested = Signal()
+    delete_requested = Signal()
 
     def __init__(self, entry, parent=None):
         super().__init__(parent)
@@ -156,7 +164,7 @@ class EntryRowWidget(QWidget):
         header.setMinimumHeight(44)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 6, 12, 6)
-        h_layout.setSpacing(10)
+        h_layout.setSpacing(8)
 
         name_label = QLabel(self.entry.name)
         name_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -175,14 +183,22 @@ class EntryRowWidget(QWidget):
 
         badge = EntryTypeBadge(self.entry.data_type)
 
-        # Kopyala butonu, sadece kapalıyken görünür
+        # ⎘ kopyala: sadece kapalıyken görünür
         self.header_copy_btn = CopyButton(self.entry.value or "")
+
+        # ↺ düzenle ve ✕ sil: her zaman görünür
+        self.edit_btn = _make_row_btn("↺", "Düzenle", "#2563EB")
+        self.delete_btn = _make_row_btn("✕", "Sil", "#EF5350")
+        self.edit_btn.clicked.connect(self.edit_requested.emit)
+        self.delete_btn.clicked.connect(self.delete_requested.emit)
 
         h_layout.addWidget(name_label, 0, Qt.AlignVCenter)
         h_layout.addWidget(self.value_label, 0, Qt.AlignVCenter)
         h_layout.addStretch()
         h_layout.addWidget(badge, 0, Qt.AlignVCenter)
         h_layout.addWidget(self.header_copy_btn, 0, Qt.AlignVCenter)
+        h_layout.addWidget(self.edit_btn, 0, Qt.AlignVCenter)
+        h_layout.addWidget(self.delete_btn, 0, Qt.AlignVCenter)
 
         self.main_layout.addWidget(header)
 
@@ -256,13 +272,13 @@ class EntryRowWidget(QWidget):
         self.expanded = not self.expanded
         self.detail_widget.setVisible(self.expanded)
 
-        # Açıkken üst satırdaki değer ve kopyala butonu gizlenir, kapanınca yeniden görünür hale gelir.
+        # Açıkken değer ve ⎘ gizlenir; ↺ ve ✕ her zaman görünür kalır.
         self.value_label.setVisible(not self.expanded)
         self.header_copy_btn.setVisible(not self.expanded)
 
         # Görünürlük değişikliğinden sonra layout'u zorla yeniden hesapla;
-        # aksi halde sizeHint() eski (güncellenmemiş) değeri döndürüp
-        # alt elemanların (ör. kopyala butonu) kesilmesine yol açabiliyor.
+        # aksi halde sizeHint() eski değeri döndürüp elemanların
+        # kesilmesine yol açabiliyor.
         self.main_layout.invalidate()
         self.main_layout.activate()
         self.updateGeometry()
@@ -282,6 +298,7 @@ class VaultRowWidget(QWidget):
     def _init_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 10, 14, 10)
+
         name_label = QLabel(self.filename)
         name_label.setObjectName("vault-row-name")
         layout.addWidget(name_label)
@@ -495,7 +512,7 @@ class EntryListWidget(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        # Başlık + Sıralama
+        # Başlık + Sıralama + Ekle butonu
         header_layout = QHBoxLayout()
         header_layout.setSpacing(10)
 
@@ -515,8 +532,16 @@ class EntryListWidget(QWidget):
         self.sort_combo.setMinimumWidth(160)
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
 
+        # Ekle butonu: dropdown'ın hemen yanında
+        self.add_btn = QPushButton("+")
+        self.add_btn.setToolTip("Yeni giriş ekle")
+        self.add_btn.setMinimumHeight(32)
+        self.add_btn.setFixedWidth(36)
+        self.add_btn.clicked.connect(self._add_entry)
+
         header_layout.addWidget(sort_label)
         header_layout.addWidget(self.sort_combo)
+        header_layout.addWidget(self.add_btn)
         layout.addLayout(header_layout)
 
         # Giriş listesi
@@ -526,24 +551,6 @@ class EntryListWidget(QWidget):
         self.list_widget.setCursor(Qt.PointingHandCursor)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget)
-
-        # Butonlar
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
-
-        self.add_btn = QPushButton("Ekle")
-        self.add_btn.clicked.connect(self._add_entry)
-
-        self.edit_btn = QPushButton("Düzenle")
-        self.edit_btn.clicked.connect(self._edit_entry)
-
-        self.delete_btn = QPushButton("Sil")
-        self.delete_btn.clicked.connect(self._delete_entry)
-
-        btn_layout.addWidget(self.add_btn)
-        btn_layout.addWidget(self.edit_btn)
-        btn_layout.addWidget(self.delete_btn)
-        layout.addLayout(btn_layout)
 
     def load_entries(self, entries: list):
         """Vault'tan gelen ham girişleri saklar ve gösterir."""
@@ -576,28 +583,20 @@ class EntryListWidget(QWidget):
     def _add_entry_item(self, entry):
         """Giriş için tıklanabilir, notu açılır-kapanır liste öğesi oluşturur."""
         widget = EntryRowWidget(entry)
+        widget.edit_requested.connect(lambda e=entry: self._edit_entry(e))
+        widget.delete_requested.connect(lambda e=entry: self._delete_entry(e))
         item = QListWidgetItem()
         item.setSizeHint(widget.sizeHint())
         self.list_widget.addItem(item)
         self.list_widget.setItemWidget(item, widget)
 
     def _on_item_clicked(self, item):
-        """Satıra tıklanınca ek notu aç/kapat ve satır yüksekliğini güncelle."""
+        """Satıra tıklanınca detay bloğunu aç/kapat ve satır yüksekliğini güncelle."""
         widget = self.list_widget.itemWidget(item)
         if widget is None:
             return
         widget.toggle()
         item.setSizeHint(widget.sizeHint())
-
-    def _selected_entry(self):
-        """Seçili öğeye karşılık gelen Entry nesnesini döndürür."""
-        item = self.list_widget.currentItem()
-        if not item:
-            return None
-        idx = self.list_widget.row(item)
-        if 0 <= idx < len(self.displayed_entries):
-            return self.displayed_entries[idx]
-        return None
 
     def _add_entry(self):
         dialog = QDialog(self)
@@ -643,12 +642,8 @@ class EntryListWidget(QWidget):
             entry = Entry(name, data_type, value, note)
             self.entry_added.emit(entry)
 
-    def _edit_entry(self):
-        entry = self._selected_entry()
-        if not entry:
-            QMessageBox.warning(self, "Uyarı", "Düzenlemek için bir giriş seçin.")
-            return
-
+    def _edit_entry(self, entry):
+        """Verilen entry için düzenleme dialogunu açar."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Girişi Düzenle")
         dialog.setMinimumWidth(450)
@@ -675,12 +670,8 @@ class EntryListWidget(QWidget):
             new_note = note_edit.text() or None
             self.entry_updated.emit(entry.name, new_value, new_note)
 
-    def _delete_entry(self):
-        entry = self._selected_entry()
-        if not entry:
-            QMessageBox.warning(self, "Uyarı", "Silmek için bir giriş seçin.")
-            return
-
+    def _delete_entry(self, entry):
+        """Verilen entry için silme onayı ister ve siler."""
         reply = QMessageBox.question(
             self,
             "Onay",

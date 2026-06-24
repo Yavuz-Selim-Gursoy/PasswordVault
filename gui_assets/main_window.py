@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from src.vault import PasswordVault
 
-from .themes import THEMES, apply_theme
+from .config import THEMES, apply_theme
 from .widgets import EntryListWidget, VaultListWidget
 
 
