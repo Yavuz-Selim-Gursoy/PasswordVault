@@ -1,7 +1,9 @@
 import base64
+import json
 import os
 import secrets
 from typing import Optional
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -121,8 +123,10 @@ class PasswordVault:
         # Eğer zaten varsa hata fırlat
         assert entry_obj.name not in entry_names, "Nesne kasada zaten var."
 
-        # Ham veriyi hemen byte halinde plaintext'e çevir ve şifrele
-        plaintext = entry_obj.to_plaintext_bytes(self.vault_name)
+        plaintext = json.dumps(
+            {"v": self.vault_name, **entry_obj.to_payload()},
+            ensure_ascii=False,
+        ).encode("utf-8")
         nonce, ciphertext = self._encrypt_entry(self._derived_master_key, plaintext)
 
         # Entry nesnesinin nonce ve ciphertext'ini çıkar
@@ -137,7 +141,6 @@ class PasswordVault:
         entry_names.clear()
 
         return entry_obj
-        del entry_obj
 
     def remove_entry(self, entry_name: str):
         entries = self.list_entries()
@@ -151,10 +154,11 @@ class PasswordVault:
             new_entries.append(e)
 
         assert found, "Nesne kasada zaten yok."
-
         self._rewrite_vault(new_entries)
 
     def update_entry(self, entry_name: str, new_value=None, new_note=None):
+        import datetime as dt
+
         entries = self.list_entries()
         found = False
 
@@ -165,6 +169,7 @@ class PasswordVault:
                     e.value = new_value
                 if new_note is not None:
                     e.additional_note = new_note
+                e.date_last_modified = dt.datetime.now()
 
         assert found, "Güncellenecek entry bulunamadı."
 
@@ -179,7 +184,10 @@ class PasswordVault:
             f.write(self.master_check["ciphertext"] + "\n")
 
             for e in entries:
-                plaintext = e.to_plaintext_bytes(self.vault_name)
+                plaintext = json.dumps(
+                    {"v": self.vault_name, **e.to_payload()},
+                    ensure_ascii=False,
+                ).encode("utf-8")
                 nonce, ciphertext = self._encrypt_entry(
                     self._derived_master_key, plaintext
                 )
@@ -202,12 +210,12 @@ class PasswordVault:
                 decrypted = self._decrypt_entry(
                     self._derived_master_key, lines[i], lines[i + 1]
                 )
-                parts = decrypted.decode("utf-8").split("|")
-                _, name, data_type, additional_note, value = parts
-                entry = Entry(name, data_type, value, additional_note)
+                payload = json.loads(decrypted.decode("utf-8"))
+                entry = Entry.from_payload(payload)
                 entry.encryption_info["nonce"] = lines[i]
                 entry.encryption_info["ciphertext"] = lines[i + 1]
                 entries.append(entry)
+
         except FileNotFoundError:
             pass
 
